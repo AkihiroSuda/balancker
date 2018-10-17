@@ -1,0 +1,65 @@
+#!/bin/bash
+# Balancker: poor man's load-balancer for `docker`
+#
+# Balancker picks up random $DOCKER_HOST from ~/.config/balancker
+#
+# Config:
+#  $ cat ~/.config/balancker
+#  # NOTE: ssh:// requires Docker v18.09 or later
+#  ssh://node1
+#  ssh://node2
+#  # If you are using Docker before v18.09, forward the socket manually with
+#  # `ssh -L` (or set up TLS)
+#  unix:///path/to/docker.sock
+#
+# Random mode:
+#  $ eval $(balancker)
+#  $ docker build -t foo /foo
+#
+# Deterministic mode with seed argument:
+#  $ eval $(balancker bar-seed)
+#  $ docker build -t bar /bar
+#
+# License: Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0)
+
+set -eu -o pipefail
+
+if [ "$#" -gt 1 ]; then
+    echo "Usage: $0 [SEED]"
+    exit 1
+fi
+
+for f in od egrep sort; do
+    if ! which $f > /dev/null; then
+        echo "# balanker failed: ${f} not found"
+        exit 0
+    fi
+done
+
+if [ "$#" -eq 1 ]; then
+    x=0
+    for f in $(echo $1 | od -An); do x=$(($f ^ $x)); done
+    RANDOM=$x
+fi
+
+
+if ! (sort --help | egrep random-source > /dev/null); then
+    echo "# balanker failed: sort does not support --random-source"
+    exit 0
+fi
+
+config=~/.config/balancker
+if [ ! -r $config ]; then
+    echo "# balanker failed: ${config} does not exist"
+    exit 0
+fi
+
+# TODO: validate the content of $config
+hosts=$(egrep '^[[:alnum:]]' $config)
+lines=$(echo "$hosts" | wc -l)
+r=$RANDOM
+n=$(( $r  % $lines + 1 ))
+chosen=$(echo "$hosts" | sed "${n}q;d")
+
+echo "DOCKER_HOST=${chosen}"
+echo "export DOCKER_HOST"
